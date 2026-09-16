@@ -6,10 +6,12 @@
   "scripts": {
     "dev:dashboard": "npm --workspace apps/dashboard run dev",
     "dev:bot": "npm --workspace apps/bot run dev",
-    "build": "npm run build:core && npm run build:dashboard && npm run build:bot",
+    "build": "npm run prisma:generate && npm run build:core && npm run build:dashboard && npm run build:bot",
     "build:core": "npm --workspace packages/core run build",
     "build:dashboard": "npm --workspace apps/dashboard run build",
-    "build:bot": "npm --workspace apps/bot run build"
+    "build:bot": "npm --workspace apps/bot run build",
+    "prisma:generate": "prisma generate --schema packages/core/prisma/schema.prisma",
+    "prisma:migrate": "prisma migrate deploy --schema packages/core/prisma/schema.prisma"
   },
   "engines": { "node": ">=20" },
   "dependencies": {
