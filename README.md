@@ -1,43 +1,77 @@
-# DRP — Emergency Hamburg Roleplay Control
+# DRP Control — Emergency Hamburg Roleplay
 
-A Discord bot + premium web dashboard for an Emergency Hamburg Roblox roleplay community.
+DRP Control is a Discord bot + premium web dashboard built for an Emergency Hamburg Roblox roleplay community. The bot runs as a persistent Node.js service (WispByte), while the dashboard is designed for Vercel. Both services share PostgreSQL through Prisma.
 
-## Architecture
+## Product scope
 
-- **Bot:** Node.js + discord.js, intended for WispByte
-- **Dashboard:** Next.js, intended for Vercel
-- **Database:** PostgreSQL + Prisma
-- **Auth:** Discord OAuth2 (to be wired into dashboard deployment)
-- **Shared registry:** every bot command is defined in `packages/core/commands.js`
+The project focuses on RP operations, departments, records, session announcements, statistics, activity and bot configuration. It intentionally does **not** include a generic moderation category, support/ticket system, 911/dispatch system, or pretend Roblox game-control APIs.
 
-## Categories
+## Dashboard
 
-- 🎮 Roleplay
-- 👮 Departments
-- 📋 Records
-- 📢 Sessions & Announcements
-- 📊 Statistics
-- 🏆 Activity
-- ⚙️ Configuration
-- 🤖 Bot
-- 🧰 Utility
+The dashboard includes a dark SaaS control center with:
 
-Moderation, support, Roblox-dispatch/911 and generic ticket systems are intentionally not part of this project.
+- Discord OAuth2 login and Manage Server authorization
+- Server/workspace selector
+- Live bot heartbeat, latency, uptime and configuration version
+- Active RP session overview
+- Automation switches and thresholds
+- Discord-style embed preview
+- Versioned configuration with Save / Save & Restart workflow
+- Department, duty, records, statistics and leaderboard sections
+- Searchable command center with detailed command metadata
+- Responsive layout for desktop, tablet and mobile
 
-## Development
+## Bot
 
-1. Copy `.env.example` to the appropriate service environment.
-2. Create a PostgreSQL database.
-3. Install dependencies with `npm install`.
-4. Run Prisma migrations/generation.
-5. Start the dashboard and bot independently.
+The bot uses the shared command registry in `packages/core/src/commands.ts` so the dashboard and Discord command browser stay aligned. It registers slash commands, tracks heartbeats in PostgreSQL, applies configured presence, stores RP sessions/operations/records, writes audit logs and polls the shared control queue for dashboard-triggered restart/maintenance requests.
+
+The restart workflow is intentionally process-manager friendly: the dashboard queues `RESTART`, the bot exits gracefully, and WispByte's process supervisor should start the configured service again.
+
+Discord's current app model is slash-command oriented; Discord's June 2026 developer update also highlights stricter controls around privileged server-member and presence data, so only the access the bot actually needs should be enabled. citeturn900563search0
+
+## Environment
+
+Copy `.env.example` to the service's environment and fill in the secrets there. Never commit `.env`, bot tokens or OAuth client secrets.
+
+Required:
+
+- `DATABASE_URL`
+- `DISCORD_TOKEN`
+- `DISCORD_CLIENT_ID`
+- `DISCORD_CLIENT_SECRET`
+- `NEXTAUTH_URL`
+- `NEXTAUTH_SECRET`
+
+For the dashboard, set Vercel's Root Directory to `apps/dashboard`. For WispByte, run the bot workspace from `apps/bot` with `npm run build` and `npm start`, or run the root workspace script documented by the host.
+
+## Database
+
+Generate Prisma Client:
+
+```bash
+npx prisma generate --schema packages/core/prisma/schema.prisma
+```
+
+For a new development database, apply the schema with your preferred Prisma migration workflow. Keep production migrations reviewed before applying them.
+
+## Discord setup
+
+Create a Discord application in the Developer Portal, add a bot user, configure the OAuth2 redirect URL as:
+
+`https://YOUR-DASHBOARD-DOMAIN/api/auth/callback/discord`
+
+Enable only the intents your implementation needs. Slash commands are the primary command surface; Discord also provides server-side command permissions through Integrations. citeturn900563search11
 
 ## Deployment
 
-The dashboard is designed for Vercel. The bot is designed for a persistent Node.js process on WispByte. The database is shared by both services.
+Dashboard: Vercel → Root Directory `apps/dashboard`.
 
-A WispByte host power Start/Stop control must only be enabled when an official WispByte API is configured; otherwise the dashboard exposes safe bot restart/maintenance controls instead of pretending to power off the host.
+Bot: WispByte → persistent Node.js process running `apps/bot`.
 
-## Status
+Database: managed PostgreSQL accessible to both services.
 
-Initial production-oriented scaffold created. Core command registry, database schema, dashboard shell, health endpoint, and bot bootstrap are included. Feature modules can now be expanded against the shared schema without replacing the architecture.
+WispByte host power Start/Stop controls must only be enabled once an official host API integration is configured. Otherwise DRP Control exposes safe bot-level restart and maintenance operations rather than faking host power state.
+
+## Current state
+
+The repository now contains the production-oriented architecture, Prisma models, OAuth route, secure guild authorization helpers, live dashboard API, premium dashboard UI, shared command registry, bot command engine, heartbeats, audit logging and dashboard-to-bot control queue.
