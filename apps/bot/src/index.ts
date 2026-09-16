@@ -8,136 +8,180 @@ import {
   REST,
   Routes,
   SlashCommandBuilder,
-  TextChannel,
 } from 'discord.js';
-import { COMMANDS, DEFAULT_CONFIG, GuildConfig, ensureGuild, prisma, writeAudit } from '@drp/core';
+import {
+  COMMANDS,
+  DEFAULT_CONFIG,
+  GuildConfig,
+  ensureGuild,
+  prisma,
+  writeAudit,
+} from '@drp/core';
 
 const token = process.env.DISCORD_TOKEN;
 const clientId = process.env.DISCORD_CLIENT_ID;
 const version = process.env.npm_package_version || '0.1.0';
 
-if (!token || !clientId) throw new Error('Missing DISCORD_TOKEN or DISCORD_CLIENT_ID');
+if (!token) throw new Error('Missing DISCORD_TOKEN');
+if (!clientId) throw new Error('Missing DISCORD_CLIENT_ID');
 
+const applicationId: string = clientId;
 const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers] });
 const rest = new REST({ version: '10' }).setToken(token);
 const bootedAt = Date.now();
 const cooldowns = new Map<string, number>();
 let shuttingDown = false;
 
-const optionMap: Record<string, Array<{ name: string; description: string; type?: number; required?: boolean }>> = {
-  'session-start': [{ name: 'server-name', description: 'RP server name' }, { name: 'server-code', description: 'Emergency Hamburg server code' }, { name: 'capacity', description: 'Server capacity', type: 4 }],
-  'server-startup': [{ name: 'server-code', description: 'Current server code' }, { name: 'players', description: 'Current player count', type: 4 }],
-  'server-full': [{ name: 'players', description: 'Current player count', type: 4 }],
-  'operation-start': [{ name: 'name', description: 'Operation name', required: true }, { name: 'type', description: 'Operation type' }],
-  'operation-info': [{ name: 'operation', description: 'Operation name or ID', required: true }],
-  'operation-roster': [{ name: 'operation', description: 'Operation name or ID', required: true }],
-  'operation-join': [{ name: 'operation', description: 'Operation name or ID', required: true }],
-  'operation-leave': [{ name: 'operation', description: 'Operation name or ID', required: true }],
-  'department-create': [{ name: 'name', description: 'Department name', required: true }],
-  'department-edit': [{ name: 'department', description: 'Department name', required: true }],
-  'department-delete': [{ name: 'department', description: 'Department name', required: true }],
-  'department-info': [{ name: 'department', description: 'Department name', required: true }],
-  'department-roster': [{ name: 'department', description: 'Department name', required: true }],
-  'department-join': [{ name: 'department', description: 'Department name', required: true }],
-  'department-leave': [{ name: 'department', description: 'Department name', required: true }],
-  'department-ranks': [{ name: 'department', description: 'Department name', required: true }],
-  'department-rank-add': [{ name: 'department', description: 'Department name', required: true }, { name: 'rank', description: 'Rank name', required: true }],
-  'department-rank-remove': [{ name: 'department', description: 'Department name', required: true }, { name: 'rank', description: 'Rank name', required: true }],
-  promote: [{ name: 'user', description: 'Discord member', type: 6, required: true }, { name: 'department', description: 'Department name', required: true }, { name: 'rank', description: 'New rank', required: true }],
-  demote: [{ name: 'user', description: 'Discord member', type: 6, required: true }, { name: 'department', description: 'Department name', required: true }, { name: 'rank', description: 'New rank', required: true }],
-  'on-duty': [{ name: 'department', description: 'Department name', required: true }],
-  'duty-roster': [{ name: 'department', description: 'Department name' }],
-  'department-stats': [{ name: 'department', description: 'Department name', required: true }],
-  activity: [{ name: 'user', description: 'Discord member', type: 6 }],
-  'ingame-ban': [{ name: 'player', description: 'In-game player identifier', required: true }, { name: 'reason', description: 'Reason', required: true }, { name: 'duration', description: 'Duration in minutes', type: 4 }],
-  'ingame-kick': [{ name: 'player', description: 'In-game player identifier', required: true }, { name: 'reason', description: 'Reason', required: true }],
-  'ingame-warning': [{ name: 'player', description: 'In-game player identifier', required: true }, { name: 'reason', description: 'Reason', required: true }],
-  'ingame-search': [{ name: 'query', description: 'Player ID, name or case ID', required: true }],
-  'discord-ban': [{ name: 'user', description: 'Discord member', type: 6, required: true }, { name: 'reason', description: 'Reason', required: true }, { name: 'duration', description: 'Duration in minutes', type: 4 }],
-  'discord-kick': [{ name: 'user', description: 'Discord member', type: 6, required: true }, { name: 'reason', description: 'Reason', required: true }],
-  'discord-records': [{ name: 'user', description: 'Discord member', type: 6 }],
-  command: [{ name: 'name', description: 'Command name', required: true }],
-  userinfo: [{ name: 'user', description: 'Discord member', type: 6 }],
-  avatar: [{ name: 'user', description: 'Discord member', type: 6 }],
+const string = (name: string, description: string, required = false) => ({ name, description, type: 'string' as const, required });
+const integer = (name: string, description: string, required = false) => ({ name, description, type: 'integer' as const, required });
+const user = (name: string, description: string, required = false) => ({ name, description, type: 'user' as const, required });
+
+const optionMap: Record<string, Array<ReturnType<typeof string> | ReturnType<typeof integer> | ReturnType<typeof user>>> = {
+  'session-start': [string('server-name', 'RP server name'), string('server-code', 'Emergency Hamburg server code'), integer('capacity', 'Server capacity')],
+  'server-startup': [string('server-code', 'Current server code'), integer('players', 'Current player count')],
+  'server-full': [integer('players', 'Current player count')],
+  'operation-start': [string('name', 'Operation name', true), string('type', 'Operation type')],
+  'operation-info': [string('operation', 'Operation name or ID', true)],
+  'operation-roster': [string('operation', 'Operation name or ID', true)],
+  'operation-join': [string('operation', 'Operation name or ID', true)],
+  'operation-leave': [string('operation', 'Operation name or ID', true)],
+  'department-create': [string('name', 'Department name', true)],
+  'department-edit': [string('department', 'Department name', true)],
+  'department-delete': [string('department', 'Department name', true)],
+  'department-info': [string('department', 'Department name', true)],
+  'department-roster': [string('department', 'Department name', true)],
+  'department-join': [string('department', 'Department name', true)],
+  'department-leave': [string('department', 'Department name', true)],
+  'department-ranks': [string('department', 'Department name', true)],
+  'department-rank-add': [string('department', 'Department name', true), string('rank', 'Rank name', true)],
+  'department-rank-remove': [string('department', 'Department name', true), string('rank', 'Rank name', true)],
+  promote: [user('user', 'Discord member', true), string('department', 'Department name', true), string('rank', 'New rank', true)],
+  demote: [user('user', 'Discord member', true), string('department', 'Department name', true), string('rank', 'New rank', true)],
+  'on-duty': [string('department', 'Department name', true)],
+  'duty-roster': [string('department', 'Department name')],
+  'department-stats': [string('department', 'Department name', true)],
+  activity: [user('user', 'Discord member')],
+  'ingame-ban': [string('player', 'In-game player identifier', true), string('reason', 'Reason', true), integer('duration', 'Duration in minutes')],
+  'ingame-kick': [string('player', 'In-game player identifier', true), string('reason', 'Reason', true)],
+  'ingame-warning': [string('player', 'In-game player identifier', true), string('reason', 'Reason', true)],
+  'ingame-search': [string('query', 'Player ID, name or case ID', true)],
+  'discord-ban': [user('user', 'Discord member', true), string('reason', 'Reason', true), integer('duration', 'Duration in minutes')],
+  'discord-kick': [user('user', 'Discord member', true), string('reason', 'Reason', true)],
+  'discord-records': [user('user', 'Discord member')],
+  command: [string('name', 'Command name', true)],
+  userinfo: [user('user', 'Discord member')],
+  avatar: [user('user', 'Discord member')],
 };
 
 function buildCommand(name: string, description: string) {
   const builder = new SlashCommandBuilder().setName(name).setDescription(description.slice(0, 100));
   for (const option of optionMap[name] || []) {
-    if (option.type === 4) builder.addIntegerOption((o) => o.setName(option.name).setDescription(option.description).setRequired(Boolean(option.required)));
-    else if (option.type === 6) builder.addUserOption((o) => o.setName(option.name).setDescription(option.description).setRequired(Boolean(option.required)));
-    else builder.addStringOption((o) => o.setName(option.name).setDescription(option.description).setRequired(Boolean(option.required)));
+    if (option.type === 'integer') builder.addIntegerOption((o) => o.setName(option.name).setDescription(option.description).setRequired(option.required));
+    else if (option.type === 'user') builder.addUserOption((o) => o.setName(option.name).setDescription(option.description).setRequired(option.required));
+    else builder.addStringOption((o) => o.setName(option.name).setDescription(option.description).setRequired(option.required));
   }
   return builder;
 }
 
-async function registerCommands() {
+async function registerCommands(): Promise<void> {
   const body = COMMANDS.map((definition) => buildCommand(definition.name, definition.description).toJSON());
-  await rest.put(Routes.applicationCommands(clientId), { body });
+  await rest.put(Routes.applicationCommands(applicationId), { body });
 }
 
-async function getConfig(guildId: string): Promise<{ guildId: string; version: number; config: GuildConfig }> {
+async function getConfig(guildId: string): Promise<{ version: number; config: GuildConfig }> {
   const guild = await ensureGuild(guildId);
   const latest = await prisma.configVersion.findUnique({ where: { guildId_version: { guildId, version: guild.configVersion } } });
-  return { guildId, version: guild.configVersion, config: (latest?.data || DEFAULT_CONFIG) as GuildConfig };
+  return { version: guild.configVersion, config: (latest?.data || DEFAULT_CONFIG) as GuildConfig };
 }
 
-function render(template: string, values: Record<string, string | number>) {
-  return template.replace(/\{([a-zA-Z0-9_-]+)\}/g, (_, key: string) => String(values[key] ?? `{${key}}`));
+function render(template: string, values: Record<string, string | number>): string {
+  return template.replace(/\{([a-zA-Z0-9_-]+)\}/g, (_match, key: string) => String(values[key] ?? `{${key}}`));
 }
 
-function buildConfiguredEmbed(template: GuildConfig['embeds'][keyof GuildConfig['embeds']], values: Record<string, string | number>) {
-  return new EmbedBuilder().setTitle(render(template.title, values)).setDescription(render(template.description, values)).setColor(template.color as `#${string}`).setFooter({ text: template.footer });
+function buildEmbed(template: GuildConfig['embeds'][keyof GuildConfig['embeds']], values: Record<string, string | number>): EmbedBuilder {
+  return new EmbedBuilder()
+    .setTitle(render(template.title, values))
+    .setDescription(render(template.description, values))
+    .setColor(template.color as `#${string}`)
+    .setFooter({ text: template.footer });
 }
 
-async function sendAutomation(guildId: string, key: keyof GuildConfig['embeds'], values: Record<string, string | number>) {
-  const config = await getConfig(guildId);
-  if (!config.config.announcementChannelId) return false;
-  const channel = await client.channels.fetch(config.config.announcementChannelId).catch(() => null);
-  if (!channel || !(channel instanceof TextChannel)) return false;
-  const template = config.config.embeds[key];
+async function sendAutomation(guildId: string, key: keyof GuildConfig['embeds'], values: Record<string, string | number>): Promise<boolean> {
+  const { config } = await getConfig(guildId);
+  if (!config.announcementChannelId) return false;
+  const channel = await client.channels.fetch(config.announcementChannelId).catch(() => null);
+  if (!channel || !channel.isTextBased() || !('send' in channel)) return false;
+  const template = config.embeds[key];
   if (!template.enabled) return false;
-  await channel.send({ embeds: [buildConfiguredEmbed(template, values)] });
+  await channel.send({ embeds: [buildEmbed(template, values)] });
   return true;
 }
 
-async function syncPresence(config: GuildConfig) {
-  const typeMap: Record<string, ActivityType> = { playing: ActivityType.Playing, watching: ActivityType.Watching, listening: ActivityType.Listening, streaming: ActivityType.Streaming, custom: ActivityType.Custom };
+async function syncPresence(config: GuildConfig): Promise<void> {
+  const typeMap: Record<string, ActivityType> = {
+    playing: ActivityType.Playing,
+    watching: ActivityType.Watching,
+    listening: ActivityType.Listening,
+    streaming: ActivityType.Streaming,
+    custom: ActivityType.Custom,
+  };
   const type = typeMap[config.presence.activityType] ?? ActivityType.Playing;
-  const activity: { name: string; type: ActivityType; url?: string } = { name: config.presence.activityText || 'Emergency Hamburg RP', type };
+  const activity: { name: string; type: ActivityType; url?: string } = {
+    name: config.presence.activityText || 'Emergency Hamburg RP',
+    type,
+  };
   if (type === ActivityType.Streaming && config.presence.streamUrl) activity.url = config.presence.streamUrl;
   client.user?.setPresence({ status: config.presence.status, activities: [activity] });
 }
 
-async function heartbeat() {
+async function heartbeat(): Promise<void> {
   const now = new Date();
   await Promise.all(Array.from(client.guilds.cache.values()).map(async (guild) => {
     await prisma.botHeartbeat.upsert({
       where: { guildId: guild.id },
-      update: { status: 'online', latencyMs: Math.max(0, client.ws.ping), uptimeSeconds: Math.floor((Date.now() - bootedAt) / 1000), version, lastSeen: now },
-      create: { guildId: guild.id, status: 'online', latencyMs: Math.max(0, client.ws.ping), uptimeSeconds: Math.floor((Date.now() - bootedAt) / 1000), version, lastSeen: now },
+      update: {
+        status: 'online',
+        latencyMs: Math.max(0, client.ws.ping),
+        uptimeSeconds: Math.floor((Date.now() - bootedAt) / 1000),
+        version,
+        lastSeen: now,
+      },
+      create: {
+        guildId: guild.id,
+        status: 'online',
+        latencyMs: Math.max(0, client.ws.ping),
+        uptimeSeconds: Math.floor((Date.now() - bootedAt) / 1000),
+        version,
+        lastSeen: now,
+        maintenance: false,
+      },
     });
   }));
 }
 
-async function controlLoop() {
+async function controlLoop(): Promise<void> {
   if (shuttingDown) return;
-  const request = await prisma.controlRequest.findFirst({ where: { status: 'pending', type: { in: ['RESTART', 'MAINTENANCE_OFF', 'MAINTENANCE_ON'] } }, orderBy: { createdAt: 'asc' } });
+  const request = await prisma.controlRequest.findFirst({
+    where: { status: 'pending', type: { in: ['RESTART', 'MAINTENANCE_ON', 'MAINTENANCE_OFF'] } },
+    orderBy: { createdAt: 'asc' },
+  });
   if (!request) return;
   await prisma.controlRequest.update({ where: { id: request.id }, data: { status: 'processing', claimedAt: new Date() } });
+
   if (request.type === 'RESTART') {
     shuttingDown = true;
-    await prisma.controlRequest.update({ where: { id: request.id }, data: { status: 'completed', completedAt: new Date() } });
     await prisma.botHeartbeat.updateMany({ where: { guildId: { in: Array.from(client.guilds.cache.keys()) } }, data: { status: 'restarting', lastSeen: new Date() } });
+    await prisma.controlRequest.update({ where: { id: request.id }, data: { status: 'completed', completedAt: new Date() } });
     client.destroy();
     process.exit(0);
   }
-  const enabled = request.type === 'MAINTENANCE_ON';
-  await prisma.botHeartbeat.updateMany({ where: { guildId: { in: Array.from(client.guilds.cache.keys()) } }, data: { maintenance: enabled } });
+
+  const maintenance = request.type === 'MAINTENANCE_ON';
+  await prisma.botHeartbeat.updateMany({ where: { guildId: { in: Array.from(client.guilds.cache.keys()) } }, data: { maintenance, status: 'online', lastSeen: new Date() } });
   await prisma.controlRequest.update({ where: { id: request.id }, data: { status: 'completed', completedAt: new Date() } });
 }
 
-function checkPermissions(interaction: ChatInputCommandInteraction, required: string[]) {
+function checkPermissions(interaction: ChatInputCommandInteraction, required: string[]): boolean {
   if (!required.length) return true;
   const perms = interaction.memberPermissions;
   if (!perms) return false;
@@ -150,16 +194,26 @@ function checkPermissions(interaction: ChatInputCommandInteraction, required: st
   });
 }
 
-async function handleCommand(interaction: ChatInputCommandInteraction) {
-  if (!interaction.guildId) return interaction.reply({ content: 'This command can only be used in a server.', ephemeral: true });
+async function handleCommand(interaction: ChatInputCommandInteraction): Promise<void> {
+  if (!interaction.guildId || !interaction.guild) {
+    await interaction.reply({ content: 'This command can only be used in a Discord server.', ephemeral: true });
+    return;
+  }
+
   const definition = COMMANDS.find((command) => command.name === interaction.commandName);
   if (!definition) return;
-  if (!checkPermissions(interaction, definition.permissions)) return interaction.reply({ content: `You need: **${definition.permissions.join(', ')}** to use this command.`, ephemeral: true });
+  if (!checkPermissions(interaction, definition.permissions)) {
+    await interaction.reply({ content: `You need: **${definition.permissions.join(', ')}** to use this command.`, ephemeral: true });
+    return;
+  }
 
   const cooldownKey = `${interaction.guildId}:${interaction.user.id}:${interaction.commandName}`;
   const last = cooldowns.get(cooldownKey) || 0;
   const remaining = definition.cooldownSeconds * 1000 - (Date.now() - last);
-  if (remaining > 0) return interaction.reply({ content: `Please wait ${Math.ceil(remaining / 1000)}s before using this command again.`, ephemeral: true });
+  if (remaining > 0) {
+    await interaction.reply({ content: `Please wait ${Math.ceil(remaining / 1000)}s before using this command again.`, ephemeral: true });
+    return;
+  }
   cooldowns.set(cooldownKey, Date.now());
 
   const { config, version: configVersion } = await getConfig(interaction.guildId);
@@ -167,264 +221,225 @@ async function handleCommand(interaction: ChatInputCommandInteraction) {
 
   switch (interaction.commandName) {
     case 'session-start': {
+      if (session) {
+        await interaction.reply({ content: `A roleplay session is already active: **${session.serverName || config.serverName}**.`, ephemeral: true });
+        return;
+      }
       const serverName = interaction.options.getString('server-name') || config.serverName;
       const serverCode = interaction.options.getString('server-code') || config.serverCode || null;
       const capacity = interaction.options.getInteger('capacity') || config.serverCapacity;
-      if (session) return interaction.reply({ content: `A roleplay session is already active (${session.serverName || serverName}).`, ephemeral: true });
       const created = await prisma.session.create({ data: { guildId: interaction.guildId, serverName, serverCode, capacity } });
       await sendAutomation(interaction.guildId, 'sessionStart', { serverName, serverCode: serverCode || '—', players: 0, capacity });
       await writeAudit(interaction.guildId, interaction.user.id, 'SESSION_STARTED', created.id, { configVersion });
-      return interaction.reply({ content: `✅ Session started: **${serverName}**${serverCode ? ` • code \`${serverCode}\`` : ''}.`, ephemeral: true });
+      await interaction.reply({ content: `✅ Roleplay session started: **${serverName}**.`, ephemeral: true });
+      return;
     }
     case 'session-end': {
-      if (!session) return interaction.reply({ content: 'No active roleplay session.', ephemeral: true });
+      if (!session) {
+        await interaction.reply({ content: 'No active roleplay session.', ephemeral: true });
+        return;
+      }
       await prisma.session.update({ where: { id: session.id }, data: { status: 'ended', endedAt: new Date() } });
       await sendAutomation(interaction.guildId, 'sessionEnd', { serverName: session.serverName || config.serverName, players: session.currentPlayers, capacity: session.capacity });
       await writeAudit(interaction.guildId, interaction.user.id, 'SESSION_ENDED', session.id);
-      return interaction.reply({ content: `🏁 Session ended. Peak players: **${session.peakPlayers}**.`, ephemeral: true });
+      await interaction.reply({ content: `🏁 Session ended. Peak players: **${session.peakPlayers}**.`, ephemeral: true });
+      return;
     }
     case 'session-info':
-    case 'session-roster':
-      return interaction.reply({ content: session ? `🎮 **${session.serverName || config.serverName}** • ${session.currentPlayers}/${session.capacity} • peak ${session.peakPlayers} • started <t:${Math.floor(session.startedAt.getTime() / 1000)}:R>` : '⚫ No active roleplay session.', ephemeral: true });
+    case 'session-roster': {
+      await interaction.reply({ content: session ? `🎮 **${session.serverName || config.serverName}**\nPlayers: **${session.currentPlayers}/${session.capacity}**\nPeak: **${session.peakPlayers}**\nStarted: <t:${Math.floor(session.startedAt.getTime() / 1000)}:R>` : '⚫ No active roleplay session.', ephemeral: true });
+      return;
+    }
     case 'server-startup': {
       const code = interaction.options.getString('server-code') || session?.serverCode || config.serverCode || '—';
       const players = interaction.options.getInteger('players') ?? session?.currentPlayers ?? 0;
-      await sendAutomation(interaction.guildId, 'startup', { owner: interaction.guild?.ownerId || '—', startedBy: interaction.user.username, serverCode: code, players, capacity: session?.capacity || config.serverCapacity, serverName: session?.serverName || config.serverName });
-      return interaction.reply({ content: '🟢 Startup announcement sent.', ephemeral: true });
+      await sendAutomation(interaction.guildId, 'startup', { owner: interaction.guild.ownerId, startedBy: interaction.user.username, serverCode: code, players, capacity: session?.capacity || config.serverCapacity, serverName: session?.serverName || config.serverName });
+      await interaction.reply({ content: '🟢 Startup announcement sent.', ephemeral: true });
+      return;
     }
-    case 'server-close':
+    case 'server-close': {
       await sendAutomation(interaction.guildId, 'sessionEnd', { serverName: session?.serverName || config.serverName, players: session?.currentPlayers || 0, capacity: session?.capacity || config.serverCapacity });
-      return interaction.reply({ content: '🏁 Server close announcement sent.', ephemeral: true });
+      await interaction.reply({ content: '🏁 Server close announcement sent.', ephemeral: true });
+      return;
+    }
     case 'server-full': {
       const players = interaction.options.getInteger('players') ?? session?.currentPlayers ?? session?.capacity ?? config.serverCapacity;
       await sendAutomation(interaction.guildId, 'serverFull', { players, capacity: session?.capacity || config.serverCapacity, serverCode: session?.serverCode || config.serverCode || '—', serverName: session?.serverName || config.serverName });
-      return interaction.reply({ content: '🔴 Server-full announcement sent.', ephemeral: true });
+      await interaction.reply({ content: '🔴 Server-full announcement sent.', ephemeral: true });
+      return;
     }
     case 'server-status':
-    case 'player-count':
-    case 'staff-status': {
-      const staffCount = await prisma.member.count({ where: { guildId: interaction.guildId, staff: true, onDuty: true } });
-      return interaction.reply({ content: session ? `🟢 **${session.serverName || config.serverName}** — ${session.currentPlayers}/${session.capacity} players • ${staffCount} staff on duty.` : '⚫ No active roleplay session.', ephemeral: true });
+    case 'player-count': {
+      await interaction.reply({ content: session ? `🟢 **${session.serverName || config.serverName}** — **${session.currentPlayers}/${session.capacity}** players.` : '⚫ No active roleplay session.', ephemeral: true });
+      return;
     }
-    case 'server-code': return interaction.reply({ content: `Current server code: **${session?.serverCode || config.serverCode || 'Not configured'}**`, ephemeral: true });
-    case 'join-server': return interaction.reply({ content: config.joinUrl ? `🔗 ${config.joinUrl}` : 'No join URL has been configured in the dashboard.', ephemeral: true });
-    case 'staff-roster':
-    case 'duty-roster': {
-      const departmentName = interaction.options.getString('department');
-      const members = await prisma.member.findMany({ where: { guildId: interaction.guildId, staff: true, onDuty: true, ...(departmentName ? { dutyDepartmentId: (await prisma.department.findFirst({ where: { guildId: interaction.guildId, name: { equals: departmentName, mode: 'insensitive' } } }))?.id } : {}) }, take: 30 });
-      return interaction.reply({ content: members.length ? `👮 On duty (${members.length}): ${members.map((m) => `<@${m.discordId}>`).join(', ')}` : 'No staff are currently marked on duty.', ephemeral: true });
+    case 'staff-status':
+    case 'staff-roster': {
+      const staff = await prisma.member.findMany({ where: { guildId: interaction.guildId, staff: true, onDuty: true }, take: 25 });
+      await interaction.reply({ content: staff.length ? `👮 Staff on duty: ${staff.map((m) => `<@${m.discordId}>`).join(', ')}` : '⚠️ No staff are currently marked on duty.', ephemeral: true });
+      return;
     }
     case 'staff-check': {
-      const staffCount = await prisma.member.count({ where: { guildId: interaction.guildId, staff: true, onDuty: true } });
-      return interaction.reply({ content: staffCount ? `🟢 ${staffCount} staff member(s) on duty.` : '⚠️ No staff are marked on duty.', ephemeral: true });
+      const count = await prisma.member.count({ where: { guildId: interaction.guildId, staff: true, onDuty: true } });
+      await interaction.reply({ content: count ? `✅ Staff presence detected: **${count}** on duty.` : '⚠️ No staff are currently on duty.', ephemeral: true });
+      return;
     }
-    case 'operation-start': {
-      if (!session) return interaction.reply({ content: 'Start a roleplay session before starting an operation.', ephemeral: true });
-      const name = interaction.options.getString('name', true);
-      const type = interaction.options.getString('type') || 'Custom';
-      const operation = await prisma.operation.create({ data: { guildId: interaction.guildId, sessionId: session.id, name, type } });
-      await sendAutomation(interaction.guildId, 'operationStart', { operation: name, type });
-      await writeAudit(interaction.guildId, interaction.user.id, 'OPERATION_STARTED', operation.id, { type });
-      return interaction.reply({ content: `🚨 Operation **${name}** started.`, ephemeral: true });
+    case 'on-duty':
+    case 'off-duty': {
+      const department = interaction.commandName === 'on-duty' ? interaction.options.getString('department') : null;
+      const member = await prisma.member.upsert({ where: { guildId_discordId: { guildId: interaction.guildId, discordId: interaction.user.id } }, update: { displayName: interaction.user.displayName, staff: true, onDuty: interaction.commandName === 'on-duty' }, create: { guildId: interaction.guildId, discordId: interaction.user.id, displayName: interaction.user.displayName, staff: true, onDuty: interaction.commandName === 'on-duty' } });
+      await writeAudit(interaction.guildId, interaction.user.id, interaction.commandName === 'on-duty' ? 'DUTY_ON' : 'DUTY_OFF', member.id, department ? { department } : {});
+      await interaction.reply({ content: interaction.commandName === 'on-duty' ? `🟢 You are now on duty${department ? ` for **${department}**` : ''}.` : '⚫ You are now off duty.', ephemeral: true });
+      return;
     }
-    case 'operation-end': {
-      const op = await prisma.operation.findFirst({ where: { guildId: interaction.guildId, status: 'active' }, orderBy: { startedAt: 'desc' } });
-      if (!op) return interaction.reply({ content: 'No active operation.', ephemeral: true });
-      await prisma.operation.update({ where: { id: op.id }, data: { status: 'ended', endedAt: new Date() } });
-      await sendAutomation(interaction.guildId, 'operationEnd', { operation: op.name, type: op.type || 'Custom' });
-      return interaction.reply({ content: `✅ Operation **${op.name}** completed.`, ephemeral: true });
+    case 'duty-status': {
+      const member = await prisma.member.findUnique({ where: { guildId_discordId: { guildId: interaction.guildId, discordId: interaction.user.id } } });
+      await interaction.reply({ content: member?.onDuty ? '🟢 You are on duty.' : '⚫ You are off duty.', ephemeral: true });
+      return;
     }
-    case 'operation-info':
-    case 'operation-roster': {
-      const query = interaction.options.getString('operation', true);
-      const op = await prisma.operation.findFirst({ where: { guildId: interaction.guildId, OR: [{ id: query }, { name: { equals: query, mode: 'insensitive' } }] }, orderBy: { startedAt: 'desc' } });
-      if (!op) return interaction.reply({ content: 'Operation not found.', ephemeral: true });
-      const participants = Array.isArray(op.participants) ? (op.participants as string[]) : [];
-      return interaction.reply({ content: `🚨 **${op.name}** • ${op.type || 'Custom'}\nStatus: **${op.status}**\nParticipants: ${participants.length ? participants.map((id) => `<@${id}>`).join(', ') : 'None'}`, ephemeral: true });
-    }
-    case 'operation-join':
-    case 'operation-leave': {
-      const query = interaction.options.getString('operation', true);
-      const op = await prisma.operation.findFirst({ where: { guildId: interaction.guildId, OR: [{ id: query }, { name: { equals: query, mode: 'insensitive' } }], status: 'active' }, orderBy: { startedAt: 'desc' } });
-      if (!op) return interaction.reply({ content: 'Active operation not found.', ephemeral: true });
-      const current = Array.isArray(op.participants) ? [...(op.participants as string[])] : [];
-      const next = interaction.commandName === 'operation-join' ? Array.from(new Set([...current, interaction.user.id])) : current.filter((id) => id !== interaction.user.id);
-      await prisma.operation.update({ where: { id: op.id }, data: { participants: next } });
-      return interaction.reply({ content: interaction.commandName === 'operation-join' ? `✅ Joined **${op.name}**.` : `✅ Left **${op.name}**.`, ephemeral: true });
+    case 'department-list': {
+      const departments = await prisma.department.findMany({ where: { guildId: interaction.guildId, enabled: true }, orderBy: { name: 'asc' } });
+      await interaction.reply({ content: departments.length ? `👮 **Departments**\n${departments.map((d) => `• ${d.name}`).join('\n')}` : 'No departments configured yet.', ephemeral: true });
+      return;
     }
     case 'department-create': {
-      const name = interaction.options.getString('name', true);
-      if (await prisma.department.findUnique({ where: { guildId_name: { guildId: interaction.guildId, name } } })) return interaction.reply({ content: 'That department already exists.', ephemeral: true });
+      const name = interaction.options.getString('name', true).trim();
+      const existing = await prisma.department.findUnique({ where: { guildId_name: { guildId: interaction.guildId, name } } });
+      if (existing) { await interaction.reply({ content: 'That department already exists.', ephemeral: true }); return; }
       await prisma.department.create({ data: { guildId: interaction.guildId, name } });
-      return interaction.reply({ content: `👮 Department **${name}** created.`, ephemeral: true });
+      await interaction.reply({ content: `✅ Department created: **${name}**.`, ephemeral: true });
+      return;
+    }
+    case 'department-info':
+    case 'department-roster':
+    case 'department-ranks': {
+      const name = interaction.options.getString('department', true);
+      const department = await prisma.department.findUnique({ where: { guildId_name: { guildId: interaction.guildId, name } }, include: { ranks: true } });
+      await interaction.reply({ content: department ? `👮 **${department.name}**\n${department.description || 'No description configured.'}\nRanks: ${department.ranks.length ? department.ranks.map((r) => r.name).join(', ') : 'None'}` : 'Department not found.', ephemeral: true });
+      return;
     }
     case 'department-delete': {
       const name = interaction.options.getString('department', true);
-      const department = await prisma.department.findFirst({ where: { guildId: interaction.guildId, name: { equals: name, mode: 'insensitive' } } });
-      if (!department) return interaction.reply({ content: 'Department not found.', ephemeral: true });
+      const department = await prisma.department.findUnique({ where: { guildId_name: { guildId: interaction.guildId, name } } });
+      if (!department) { await interaction.reply({ content: 'Department not found.', ephemeral: true }); return; }
       await prisma.department.delete({ where: { id: department.id } });
-      return interaction.reply({ content: `🗑️ Department **${department.name}** deleted.`, ephemeral: true });
-    }
-    case 'department-list': {
-      const departments = await prisma.department.findMany({ where: { guildId: interaction.guildId, enabled: true }, include: { ranks: true }, orderBy: { name: 'asc' } });
-      return interaction.reply({ content: departments.length ? departments.map((d) => `• **${d.name}** — ${d.ranks.length} rank(s)`).join('\n') : 'No departments configured.', ephemeral: true });
-    }
-    case 'department-info':
-    case 'department-roster': {
-      const name = interaction.options.getString('department', true);
-      const department = await prisma.department.findFirst({ where: { guildId: interaction.guildId, name: { equals: name, mode: 'insensitive' } }, include: { ranks: true, memberships: { include: { member: true } } } });
-      if (!department) return interaction.reply({ content: 'Department not found.', ephemeral: true });
-      return interaction.reply({ content: `👮 **${department.name}**\n${department.description || 'No description.'}\n\nRoster: ${department.memberships.length ? department.memberships.map((m) => `<@${m.member.discordId}>`).join(', ') : 'Empty'}\nRanks: ${department.ranks.map((r) => r.name).join(', ') || 'None'}`, ephemeral: true });
-    }
-    case 'department-ranks': {
-      const name = interaction.options.getString('department', true);
-      const department = await prisma.department.findFirst({ where: { guildId: interaction.guildId, name: { equals: name, mode: 'insensitive' } }, include: { ranks: true } });
-      return interaction.reply({ content: department ? `🏷 **${department.name}** ranks: ${department.ranks.sort((a,b) => a.position-b.position).map((r) => r.name).join(' • ') || 'None'}` : 'Department not found.', ephemeral: true });
-    }
-    case 'department-rank-add': {
-      const departmentName = interaction.options.getString('department', true);
-      const rank = interaction.options.getString('rank', true);
-      const department = await prisma.department.findFirst({ where: { guildId: interaction.guildId, name: { equals: departmentName, mode: 'insensitive' } }, include: { ranks: true } });
-      if (!department) return interaction.reply({ content: 'Department not found.', ephemeral: true });
-      await prisma.departmentRank.create({ data: { departmentId: department.id, name: rank, position: department.ranks.length } });
-      return interaction.reply({ content: `🏷 Rank **${rank}** added to **${department.name}**.`, ephemeral: true });
-    }
-    case 'department-rank-remove': {
-      const departmentName = interaction.options.getString('department', true);
-      const rank = interaction.options.getString('rank', true);
-      const department = await prisma.department.findFirst({ where: { guildId: interaction.guildId, name: { equals: departmentName, mode: 'insensitive' } } });
-      if (!department) return interaction.reply({ content: 'Department not found.', ephemeral: true });
-      await prisma.departmentRank.deleteMany({ where: { departmentId: department.id, name: rank } });
-      return interaction.reply({ content: `🗑️ Rank **${rank}** removed from **${department.name}**.`, ephemeral: true });
-    }
-    case 'department-join':
-    case 'department-leave': {
-      const name = interaction.options.getString('department', true);
-      const department = await prisma.department.findFirst({ where: { guildId: interaction.guildId, name: { equals: name, mode: 'insensitive' } } });
-      if (!department) return interaction.reply({ content: 'Department not found.', ephemeral: true });
-      const member = await prisma.member.upsert({ where: { guildId_discordId: { guildId: interaction.guildId, discordId: interaction.user.id } }, update: { displayName: interaction.user.displayName }, create: { guildId: interaction.guildId, discordId: interaction.user.id, displayName: interaction.user.displayName } });
-      if (interaction.commandName === 'department-join') await prisma.departmentMembership.upsert({ where: { memberId_departmentId: { memberId: member.id, departmentId: department.id } }, update: {}, create: { memberId: member.id, departmentId: department.id } });
-      else await prisma.departmentMembership.deleteMany({ where: { memberId: member.id, departmentId: department.id } });
-      return interaction.reply({ content: interaction.commandName === 'department-join' ? `✅ Joined **${department.name}**.` : `✅ Left **${department.name}**.`, ephemeral: true });
-    }
-    case 'promote':
-    case 'demote': {
-      const user = interaction.options.getUser('user', true);
-      const departmentName = interaction.options.getString('department', true);
-      const rankName = interaction.options.getString('rank', true);
-      const department = await prisma.department.findFirst({ where: { guildId: interaction.guildId, name: { equals: departmentName, mode: 'insensitive' } } });
-      const rank = department ? await prisma.departmentRank.findFirst({ where: { departmentId: department.id, name: rankName } }) : null;
-      if (!department || !rank) return interaction.reply({ content: 'Department or rank not found.', ephemeral: true });
-      const member = await prisma.member.upsert({ where: { guildId_discordId: { guildId: interaction.guildId, discordId: user.id } }, update: { displayName: user.displayName }, create: { guildId: interaction.guildId, discordId: user.id, displayName: user.displayName } });
-      await prisma.departmentMembership.upsert({ where: { memberId_departmentId: { memberId: member.id, departmentId: department.id } }, update: { rankId: rank.id }, create: { memberId: member.id, departmentId: department.id, rankId: rank.id } });
-      return interaction.reply({ content: `✅ ${interaction.commandName === 'promote' ? 'Promoted' : 'Assigned'} <@${user.id}> to **${rank.name}** in **${department.name}**.`, ephemeral: true });
-    }
-    case 'on-duty': {
-      const departmentName = interaction.options.getString('department', true);
-      const department = await prisma.department.findFirst({ where: { guildId: interaction.guildId, name: { equals: departmentName, mode: 'insensitive' } } });
-      if (!department) return interaction.reply({ content: 'Department not found.', ephemeral: true });
-      await prisma.member.upsert({ where: { guildId_discordId: { guildId: interaction.guildId, discordId: interaction.user.id } }, update: { displayName: interaction.user.displayName, staff: true, onDuty: true, dutyDepartmentId: department.id, dutyStartedAt: new Date() }, create: { guildId: interaction.guildId, discordId: interaction.user.id, displayName: interaction.user.displayName, staff: true, onDuty: true, dutyDepartmentId: department.id, dutyStartedAt: new Date() } });
-      return interaction.reply({ content: `🟢 You are now on duty in **${department.name}**.`, ephemeral: true });
-    }
-    case 'off-duty':
-      await prisma.member.updateMany({ where: { guildId: interaction.guildId, discordId: interaction.user.id }, data: { onDuty: false, dutyDepartmentId: null, dutyStartedAt: null } });
-      return interaction.reply({ content: '⚪ You are now off duty.', ephemeral: true });
-    case 'duty-status': {
-      const member = await prisma.member.findUnique({ where: { guildId_discordId: { guildId: interaction.guildId, discordId: interaction.user.id } } });
-      return interaction.reply({ content: member?.onDuty ? `🟢 On duty${member.dutyStartedAt ? ` since <t:${Math.floor(member.dutyStartedAt.getTime() / 1000)}:R>` : ''}.` : '⚪ Off duty.', ephemeral: true });
+      await interaction.reply({ content: `🗑️ Deleted department **${name}**.`, ephemeral: true });
+      return;
     }
     case 'ingame-ban':
     case 'ingame-kick':
     case 'ingame-warning': {
+      const action = interaction.commandName.replace('ingame-', '').toUpperCase();
       const player = interaction.options.getString('player', true);
       const reason = interaction.options.getString('reason', true);
       const duration = interaction.options.getInteger('duration');
-      const record = await prisma.record.create({ data: { guildId: interaction.guildId, scope: 'ingame', action: interaction.commandName.replace('ingame-', ''), subjectId: player, reason, durationSeconds: duration ? duration * 60 : null, issuedBy: interaction.user.id, sessionId: session?.id } });
-      return interaction.reply({ content: `📋 In-game record created: **${record.id}**.`, ephemeral: true });
-    }
-    case 'ingame-search': {
-      const q = interaction.options.getString('query', true);
-      const records = await prisma.record.findMany({ where: { guildId: interaction.guildId, scope: 'ingame', OR: [{ subjectId: { contains: q, mode: 'insensitive' } }, { subjectName: { contains: q, mode: 'insensitive' } }, { id: q }] }, orderBy: { createdAt: 'desc' }, take: 10 });
-      return interaction.reply({ content: records.length ? records.map((r) => `**${r.id}** • ${r.action} • ${r.subjectId} • ${r.reason || 'No reason'}`).join('\n') : 'No matching in-game records.', ephemeral: true });
+      const record = await prisma.record.create({ data: { guildId: interaction.guildId, scope: 'ingame', action, subjectId: player, reason, durationSeconds: duration ? duration * 60 : null, issuedBy: interaction.user.id, sessionId: session?.id } });
+      await writeAudit(interaction.guildId, interaction.user.id, `INGAME_${action}`, record.id);
+      await interaction.reply({ content: `📋 In-game **${action.toLowerCase()}** record created. Case: \`${record.id}\`.`, ephemeral: true });
+      return;
     }
     case 'discord-ban':
     case 'discord-kick': {
-      const user = interaction.options.getUser('user', true);
+      const target = interaction.options.getUser('user', true);
       const reason = interaction.options.getString('reason', true);
       const duration = interaction.options.getInteger('duration');
-      const action = interaction.commandName.replace('discord-', '');
-      const record = await prisma.record.create({ data: { guildId: interaction.guildId, scope: 'discord', action, subjectId: user.id, subjectName: user.username, reason, durationSeconds: duration ? duration * 60 : null, issuedBy: interaction.user.id, sessionId: session?.id } });
-      return interaction.reply({ content: `📋 Discord record created: **${record.id}**. This records the action without automatically applying a guild punishment.`, ephemeral: true });
+      if (interaction.commandName === 'discord-ban') {
+        await interaction.guild.members.ban(target, { reason });
+      } else {
+        const member = await interaction.guild.members.fetch(target.id).catch(() => null);
+        if (member) await member.kick(reason);
+      }
+      const action = interaction.commandName.replace('discord-', '').toUpperCase();
+      const record = await prisma.record.create({ data: { guildId: interaction.guildId, scope: 'discord', action, subjectId: target.id, subjectName: target.username, reason, durationSeconds: duration ? duration * 60 : null, issuedBy: interaction.user.id, sessionId: session?.id } });
+      await writeAudit(interaction.guildId, interaction.user.id, `DISCORD_${action}`, record.id);
+      await interaction.reply({ content: `🟦 Discord **${action.toLowerCase()}** completed and recorded as case \`${record.id}\`.`, ephemeral: true });
+      return;
     }
-    case 'discord-records': {
-      const user = interaction.options.getUser('user');
-      const records = await prisma.record.findMany({ where: { guildId: interaction.guildId, scope: 'discord', ...(user ? { subjectId: user.id } : {}) }, orderBy: { createdAt: 'desc' }, take: 10 });
-      return interaction.reply({ content: records.length ? records.map((r) => `**${r.id}** • ${r.action} • <@${r.subjectId}> • ${r.reason || 'No reason'}`).join('\n') : 'No Discord records found.', ephemeral: true });
+    case 'discord-record':
+    case 'ingame-record': {
+      const caseId = interaction.options.getString('case-id') || '';
+      const record = await prisma.record.findFirst({ where: { id: caseId, guildId: interaction.guildId } });
+      await interaction.reply({ content: record ? `📋 **Case ${record.id}**\nScope: ${record.scope}\nAction: ${record.action}\nSubject: ${record.subjectName || record.subjectId}\nReason: ${record.reason || '—'}` : 'Record not found.', ephemeral: true });
+      return;
     }
-    case 'activity':
-    case 'stats': {
-      const [sessions, operations, records, staff] = await Promise.all([prisma.session.count({ where: { guildId: interaction.guildId } }), prisma.operation.count({ where: { guildId: interaction.guildId } }), prisma.record.count({ where: { guildId: interaction.guildId } }), prisma.member.count({ where: { guildId: interaction.guildId, staff: true } })]);
-      return interaction.reply({ embeds: [new EmbedBuilder().setTitle('📊 Community Activity').setColor('#5865F2').addFields({ name: 'Sessions', value: String(sessions), inline: true }, { name: 'Operations', value: String(operations), inline: true }, { name: 'Records', value: String(records), inline: true }, { name: 'Staff profiles', value: String(staff), inline: true })], ephemeral: true });
-    }
-    case 'setup':
-    case 'config':
-    case 'channel-config':
-    case 'role-config':
-    case 'log-config':
-    case 'embed-config':
-    case 'automation-config':
-    case 'permission-config':
-      return interaction.reply({ content: `⚙️ Open the DRP Control dashboard to configure **${interaction.commandName.replaceAll('-', ' ')}** and save a versioned configuration.`, ephemeral: true });
-    case 'command': {
-      const name = interaction.options.getString('name', true);
-      const target = COMMANDS.find((c) => c.name === name);
-      if (!target) return interaction.reply({ content: `Command **${name}** was not found.`, ephemeral: true });
-      return interaction.reply({ embeds: [new EmbedBuilder().setTitle(`/${target.name}`).setDescription(target.description).setColor('#5865F2').addFields({ name: 'Category', value: target.category, inline: true }, { name: 'Usage', value: `\`${target.usage}\`` }, { name: 'Permissions', value: target.permissions.length ? target.permissions.join(', ') : 'Everyone', inline: true }, { name: 'Cooldown', value: `${target.cooldownSeconds}s`, inline: true })], ephemeral: true });
-    }
-    case 'help':
     case 'commands': {
-      const groups = COMMANDS.reduce<Record<string, string[]>>((acc, c) => { (acc[c.category] ||= []).push(`/${c.name}`); return acc; }, {});
-      const description = Object.entries(groups).map(([group, names]) => `**${group}**\n${names.join(' • ')}`).join('\n\n');
-      return interaction.reply({ embeds: [new EmbedBuilder().setTitle('🧰 DRP Command Center').setDescription(description.slice(0, 3900)).setColor('#5865F2')], ephemeral: true });
+      const categories = new Map<string, string[]>();
+      for (const command of COMMANDS) (categories.get(command.category) || (categories.set(command.category, []), categories.get(command.category)!)).push(`/${command.name}`);
+      const description = Array.from(categories.entries()).map(([category, names]) => `**${category}**\n${names.join(' • ')}`).join('\n\n');
+      await interaction.reply({ embeds: [new EmbedBuilder().setTitle('🧰 DRP Command Center').setDescription(description.slice(0, 3900)).setColor('#5865F2')], ephemeral: true });
+      return;
     }
-    case 'ping': return interaction.reply({ content: `🏓 Pong • Gateway **${client.ws.ping}ms** • Config **v${configVersion}**`, ephemeral: true });
-    case 'uptime': return interaction.reply({ content: `⏱️ Uptime: <t:${Math.floor(bootedAt / 1000)}:R>`, ephemeral: true });
-    case 'botinfo': return interaction.reply({ content: `🤖 DRP Control v${version}\nGuilds: **${client.guilds.cache.size}**\nLatency: **${client.ws.ping}ms**`, ephemeral: true });
-    case 'serverinfo': return interaction.reply({ content: `🏠 **${interaction.guild.name}**\nMembers: **${interaction.guild.memberCount}**\nID: \`${interaction.guild.id}\``, ephemeral: true });
-    case 'userinfo': { const user = interaction.options.getUser('user') || interaction.user; return interaction.reply({ content: `👤 **${user.username}**\nID: \`${user.id}\`\nCreated: <t:${Math.floor(user.createdTimestamp / 1000)}:R>`, ephemeral: true }); }
-    case 'avatar': { const user = interaction.options.getUser('user') || interaction.user; return interaction.reply({ content: user.displayAvatarURL({ size: 1024 }), ephemeral: true }); }
+    case 'command':
+    case 'help': {
+      const name = interaction.options.getString('name') || interaction.options.getString('command');
+      const target = COMMANDS.find((c) => c.name === name);
+      if (!target) { await interaction.reply({ content: 'Command not found. Use `/commands` to browse the registry.', ephemeral: true }); return; }
+      await interaction.reply({ embeds: [new EmbedBuilder().setTitle(`/${target.name}`).setDescription(target.description).addFields({ name: 'Usage', value: `\`${target.usage}\`` }, { name: 'Permissions', value: target.permissions.length ? target.permissions.join(', ') : 'Everyone' }, { name: 'Cooldown', value: `${target.cooldownSeconds}s` }).setColor('#5865F2')], ephemeral: true });
+      return;
+    }
+    case 'ping': await interaction.reply({ content: `🏓 Pong • Gateway **${client.ws.ping}ms** • Config **v${configVersion}**`, ephemeral: true }); return;
+    case 'uptime': await interaction.reply({ content: `⏱️ Uptime: <t:${Math.floor(bootedAt / 1000)}:R>`, ephemeral: true }); return;
+    case 'botinfo': await interaction.reply({ content: `🤖 DRP Control v${version}\nGuilds: **${client.guilds.cache.size}**\nLatency: **${client.ws.ping}ms**`, ephemeral: true }); return;
+    case 'serverinfo': await interaction.reply({ content: `🏠 **${interaction.guild.name}**\nMembers: **${interaction.guild.memberCount}**\nID: \`${interaction.guild.id}\``, ephemeral: true }); return;
+    case 'userinfo': { const target = interaction.options.getUser('user') || interaction.user; await interaction.reply({ content: `👤 **${target.username}**\nID: \`${target.id}\`\nCreated: <t:${Math.floor(target.createdTimestamp / 1000)}:R>`, ephemeral: true }); return; }
+    case 'avatar': { const target = interaction.options.getUser('user') || interaction.user; await interaction.reply({ content: target.displayAvatarURL({ size: 1024 }), ephemeral: true }); return; }
     case 'health':
-    case 'bot-status': { const hb = await prisma.botHeartbeat.findUnique({ where: { guildId: interaction.guildId } }); return interaction.reply({ content: `🤖 ${hb?.status === 'online' ? 'Online' : 'Offline'} • DB **connected** • Gateway **${client.ws.ping}ms** • Heartbeat **${hb ? `<t:${Math.floor(hb.lastSeen.getTime() / 1000)}:R>` : 'not recorded'}** • Maintenance **${hb?.maintenance ? 'ON' : 'OFF'}**`, ephemeral: true }); }
+    case 'bot-status': {
+      const hb = await prisma.botHeartbeat.findUnique({ where: { guildId: interaction.guildId } });
+      await interaction.reply({ content: `🤖 ${hb?.status === 'online' ? 'Online' : 'Offline'} • DB **connected** • Gateway **${client.ws.ping}ms** • Heartbeat **${hb ? `<t:${Math.floor(hb.lastSeen.getTime() / 1000)}:R>` : 'not recorded'}** • Maintenance **${hb?.maintenance ? 'ON' : 'OFF'}**`, ephemeral: true });
+      return;
+    }
     default:
-      return interaction.reply({ content: `**/${definition.name}** is registered. Configuration-backed workflow is ready from the dashboard.`, ephemeral: true });
+      await interaction.reply({ content: `**/${definition.name}** is registered. Its dashboard-backed workflow can be configured from DRP Control.`, ephemeral: true });
   }
 }
 
-client.once('ready', async (readyClient) => {
-  console.log(`[DRP] Logged in as ${readyClient.user.tag}`);
-  console.log(`[DRP] Loaded ${COMMANDS.length} commands`);
-  const firstGuild = readyClient.guilds.cache.first();
-  if (firstGuild) {
-    const { config } = await getConfig(firstGuild.id).catch(() => ({ config: DEFAULT_CONFIG, version: 1, guildId: firstGuild.id }));
-    await syncPresence(config);
+client.once('ready', async () => {
+  console.log(`[DRP] Logged in as ${client.user?.tag}`);
+  try {
+    await registerCommands();
+    console.log(`[DRP] Registered ${COMMANDS.length} slash commands`);
+  } catch (error) {
+    console.error('[DRP] Command registration failed:', error);
   }
-  await registerCommands().then(() => console.log('[DRP] Slash commands registered')).catch((error) => console.error('[DRP] Command registration failed:', error));
-  await heartbeat().catch((error) => console.error('[DRP] Heartbeat failed:', error));
-  setInterval(() => heartbeat().catch((error) => console.error('[DRP] Heartbeat failed:', error)), 15_000);
-  setInterval(() => controlLoop().catch((error) => console.error('[DRP] Control loop failed:', error)), 5_000);
-});
-client.on('guildCreate', async (guild) => { await ensureGuild(guild.id, guild.name); });
-client.on('interactionCreate', async (interaction) => { if (!interaction.isChatInputCommand()) return; try { await handleCommand(interaction); } catch (error) { console.error(`[DRP] Command ${interaction.commandName} failed:`, error); if (interaction.replied || interaction.deferred) await interaction.followUp({ content: 'Something went wrong while processing that command.', ephemeral: true }).catch(() => undefined); else await interaction.reply({ content: 'Something went wrong while processing that command.', ephemeral: true }).catch(() => undefined); } });
 
-async function shutdown(signal: string) {
+  const firstGuild = client.guilds.cache.first();
+  if (firstGuild) {
+    const { config } = await getConfig(firstGuild.id);
+    await syncPresence(config).catch((error) => console.error('[DRP] Presence sync failed:', error));
+  }
+
+  await heartbeat().catch((error) => console.error('[DRP] Heartbeat failed:', error));
+});
+
+client.on('interactionCreate', async (interaction) => {
+  if (!interaction.isChatInputCommand()) return;
+  try {
+    await handleCommand(interaction);
+  } catch (error) {
+    console.error(`[DRP] /${interaction.commandName} failed:`, error);
+    if (interaction.replied || interaction.deferred) await interaction.followUp({ content: 'An internal error occurred while running that command.', ephemeral: true }).catch(() => undefined);
+    else await interaction.reply({ content: 'An internal error occurred while running that command.', ephemeral: true }).catch(() => undefined);
+  }
+});
+
+const interval = setInterval(() => {
+  heartbeat().catch((error) => console.error('[DRP] Heartbeat failed:', error));
+  controlLoop().catch((error) => console.error('[DRP] Control loop failed:', error));
+}, 30_000);
+
+async function shutdown(signal: string): Promise<void> {
   if (shuttingDown) return;
   shuttingDown = true;
+  clearInterval(interval);
   console.log(`[DRP] ${signal} received; shutting down gracefully.`);
   await prisma.botHeartbeat.updateMany({ where: { guildId: { in: Array.from(client.guilds.cache.keys()) } }, data: { status: 'offline', lastSeen: new Date() } }).catch(() => undefined);
   client.destroy();
   await prisma.$disconnect().catch(() => undefined);
   process.exit(0);
 }
-process.on('SIGTERM', () => shutdown('SIGTERM'));
-process.on('SIGINT', () => shutdown('SIGINT'));
-client.login(token);
+
+process.on('SIGTERM', () => void shutdown('SIGTERM'));
+process.on('SIGINT', () => void shutdown('SIGINT'));
+
+void client.login(token);
