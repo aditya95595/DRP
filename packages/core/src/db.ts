@@ -16,6 +16,6 @@ export async function ensureGuild(guildId: string, name?: string) {
 
 export async function writeAudit(guildId: string, actorId: string | null, action: string, target?: string, metadata: Record<string, unknown> = {}) {
   return prisma.auditLog.create({
-    data: { guildId, actorId, action, target, metadata },
+    data: { guildId, actorId, action, target, metadata: JSON.parse(JSON.stringify(metadata)) },
   });
 }
