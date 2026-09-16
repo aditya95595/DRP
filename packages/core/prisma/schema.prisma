@@ -20,6 +20,8 @@ model Guild {
   operations          Operation[]
   records             Record[]
   auditLogs           AuditLog[]
+  controlRequests     ControlRequest[]
+  heartbeat           BotHeartbeat?
 }
 
 model ConfigVersion {
@@ -31,6 +33,32 @@ model ConfigVersion {
   createdAt           DateTime @default(now())
   guild               Guild    @relation(fields: [guildId], references: [id], onDelete: Cascade)
   @@unique([guildId, version])
+}
+
+model ControlRequest {
+  id                 String   @id @default(cuid())
+  guildId            String
+  type               String
+  payload             Json     @default("{}")
+  status              String   @default("pending")
+  requestedBy        String?
+  createdAt          DateTime @default(now())
+  claimedAt          DateTime?
+  completedAt        DateTime?
+  guild              Guild    @relation(fields: [guildId], references: [id], onDelete: Cascade)
+  @@index([guildId, status, createdAt])
+}
+
+model BotHeartbeat {
+  guildId            String   @id
+  status             String   @default("offline")
+  latencyMs           Int?
+  uptimeSeconds       Int?
+  version             String?
+  shardId             Int?
+  maintenance         Boolean  @default(false)
+  lastSeen             DateTime @default(now())
+  guild               Guild    @relation(fields: [guildId], references: [id], onDelete: Cascade)
 }
 
 model Department {
@@ -64,8 +92,10 @@ model Member {
   displayName         String?
   staff               Boolean  @default(false)
   onDuty              Boolean  @default(false)
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  dutyDepartmentId   String?
+  dutyStartedAt      DateTime?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
   guild              Guild    @relation(fields: [guildId], references: [id], onDelete: Cascade)
   memberships        DepartmentMembership[]
   @@unique([guildId, discordId])
