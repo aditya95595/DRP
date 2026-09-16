@@ -1,0 +1,140 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Guild {
+  id                 String        @id
+  name               String?
+  configVersion      Int           @default(1)
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+  configs             ConfigVersion[]
+  departments         Department[]
+  members             Member[]
+  sessions            Session[]
+  operations          Operation[]
+  records             Record[]
+  auditLogs           AuditLog[]
+}
+
+model ConfigVersion {
+  id                 String   @id @default(cuid())
+  guildId            String
+  version             Int
+  data                Json
+  savedBy             String?
+  createdAt           DateTime @default(now())
+  guild               Guild    @relation(fields: [guildId], references: [id], onDelete: Cascade)
+  @@unique([guildId, version])
+}
+
+model Department {
+  id                 String   @id @default(cuid())
+  guildId            String
+  name               String
+  description        String?
+  enabled            Boolean  @default(true)
+  settings           Json     @default("{}")
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  guild              Guild    @relation(fields: [guildId], references: [id], onDelete: Cascade)
+  ranks              DepartmentRank[]
+  memberships        DepartmentMembership[]
+  @@unique([guildId, name])
+}
+
+model DepartmentRank {
+  id                 String   @id @default(cuid())
+  departmentId       String
+  name               String
+  position            Int      @default(0)
+  department         Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  @@unique([departmentId, name])
+}
+
+model Member {
+  id                 String   @id @default(cuid())
+  guildId            String
+  discordId          String
+  displayName         String?
+  staff               Boolean  @default(false)
+  onDuty              Boolean  @default(false)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  guild              Guild    @relation(fields: [guildId], references: [id], onDelete: Cascade)
+  memberships        DepartmentMembership[]
+  @@unique([guildId, discordId])
+}
+
+model DepartmentMembership {
+  id                 String   @id @default(cuid())
+  memberId           String
+  departmentId       String
+  rankId             String?
+  joinedAt           DateTime @default(now())
+  member             Member   @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  department         Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  @@unique([memberId, departmentId])
+}
+
+model Session {
+  id                 String   @id @default(cuid())
+  guildId            String
+  serverName         String?
+  serverCode         String?
+  status             String   @default("active")
+  startedAt          DateTime @default(now())
+  endedAt            DateTime?
+  peakPlayers        Int      @default(0)
+  currentPlayers     Int      @default(0)
+  capacity           Int      @default(50)
+  guild              Guild    @relation(fields: [guildId], references: [id], onDelete: Cascade)
+  operations         Operation[]
+}
+
+model Operation {
+  id                 String   @id @default(cuid())
+  guildId            String
+  sessionId          String?
+  name               String
+  type               String?
+  status             String   @default("active")
+  startedAt          DateTime @default(now())
+  endedAt            DateTime?
+  participants       Json     @default("[]")
+  guild              Guild    @relation(fields: [guildId], references: [id], onDelete: Cascade)
+  session            Session? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+}
+
+model Record {
+  id                 String   @id @default(cuid())
+  guildId            String
+  scope              String
+  action             String
+  subjectId          String
+  subjectName        String?
+  reason             String?
+  durationSeconds    Int?
+  issuedBy           String
+  sessionId          String?
+  createdAt          DateTime @default(now())
+  guild              Guild    @relation(fields: [guildId], references: [id], onDelete: Cascade)
+  @@index([guildId, scope, subjectId])
+}
+
+model AuditLog {
+  id                 String   @id @default(cuid())
+  guildId            String
+  actorId            String?
+  action             String
+  target             String?
+  metadata           Json     @default("{}")
+  createdAt          DateTime @default(now())
+  guild              Guild    @relation(fields: [guildId], references: [id], onDelete: Cascade)
+  @@index([guildId, createdAt])
+}
