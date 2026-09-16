@@ -1,0 +1,31 @@
+{
+  "name": "drp",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": ["apps/dashboard", "apps/bot", "packages/core"],
+  "scripts": {
+    "dev:dashboard": "npm --workspace apps/dashboard run dev",
+    "dev:bot": "npm --workspace apps/bot run dev",
+    "build": "npm run build:core && npm run build:dashboard && npm run build:bot",
+    "build:core": "npm --workspace packages/core run build",
+    "build:dashboard": "npm --workspace apps/dashboard run build",
+    "build:bot": "npm --workspace apps/bot run build"
+  },
+  "engines": { "node": ">=20" },
+  "dependencies": {
+    "@prisma/client": "^6.16.0",
+    "discord.js": "^14.22.1",
+    "next": "^15.5.0",
+    "next-auth": "^4.24.11",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1",
+    "zod": "^4.1.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.18.6",
+    "@types/react": "^19.1.13",
+    "@types/react-dom": "^19.1.9",
+    "prisma": "^6.16.0",
+    "typescript": "^5.9.2"
+  }
+}
