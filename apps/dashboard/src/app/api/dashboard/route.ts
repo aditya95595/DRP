@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { prisma, ensureGuild, DEFAULT_CONFIG } from '@drp/core';
+import { prisma, DEFAULT_CONFIG } from '@drp/core';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { canManageGuild } from '@/lib/discord';
@@ -15,7 +15,22 @@ export async function GET(request: Request) {
   const authenticated = Boolean(session?.user);
   const authorized = authenticated ? await canManageGuild(guildId) : false;
 
-  const guild = await ensureGuild(guildId);
+  // Unauthenticated visitors get a safe UI preview only; server records/config are never exposed publicly.
+  if (!authenticated || !authorized) {
+    return NextResponse.json({
+      authenticated,
+      authorized,
+      guild: { id: guildId, name: 'Preview workspace', configVersion: 1 },
+      config: DEFAULT_CONFIG,
+      heartbeat: null,
+      activeSession: null,
+      metrics: { sessions: 0, operations: 0, records: 0, staff: 0, departments: 0 },
+      recentActivity: [],
+      configVersions: [],
+    });
+  }
+
+  const guild = await prisma.guild.findUnique({ where: { id: guildId } });
   const latest = await prisma.configVersion.findFirst({ where: { guildId }, orderBy: { version: 'desc' } });
   const config = (latest?.data || DEFAULT_CONFIG) as typeof DEFAULT_CONFIG;
   const heartbeat = await prisma.botHeartbeat.findUnique({ where: { guildId } });
@@ -27,19 +42,8 @@ export async function GET(request: Request) {
     prisma.member.count({ where: { guildId, staff: true } }),
     prisma.department.count({ where: { guildId, enabled: true } }),
   ]);
-
   const recentActivity = await prisma.auditLog.findMany({ where: { guildId }, orderBy: { createdAt: 'desc' }, take: 8 });
   const configVersions = await prisma.configVersion.findMany({ where: { guildId }, orderBy: { version: 'desc' }, take: 8, select: { version: true, savedBy: true, createdAt: true } });
 
-  return NextResponse.json({
-    authenticated,
-    authorized,
-    guild: { ...guild, configVersion: guild.configVersion },
-    config,
-    heartbeat,
-    activeSession,
-    metrics: { sessions, operations, records, staff, departments },
-    recentActivity,
-    configVersions,
-  });
+  return NextResponse.json({ authenticated, authorized, guild: { id: guildId, name: guild?.name || 'Discord server', configVersion: guild?.configVersion || 1 }, config, heartbeat, activeSession, metrics: { sessions, operations, records, staff, departments }, recentActivity, configVersions });
 }
