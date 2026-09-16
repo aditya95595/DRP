@@ -16,7 +16,7 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm install
-      - run: npm run prisma:generate
+      - run: npx prisma generate --schema packages/core/prisma/schema.prisma
       - run: npm run build:core
       - run: npm run build:dashboard
       - run: npm run build:bot
